@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Шутки с реакциями</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <button onclick="toggleTheme()" class="theme-toggle">🌓</button>
+
+  <div class="container">
+    <h1>Лучшие шутки</h1>
+
+    <div class="controls">
+      <input type="text" id="searchInput" placeholder="Поиск по шуткам..." oninput="loadJokes()" />
+      <select id="sortSelect" onchange="loadJokes()">
+        <option value="newest">Сначала новые</option>
+        <option value="popular">По популярности</option>
+        <option value="controversial">Спорные</option>
+      </select>
+      <select id="categorySelect" onchange="loadJokes()">
+        <option value="">Все категории</option>
+      </select>
+      <input type="text" id="tagFilter" placeholder="Фильтр по тегам..." oninput="loadJokes()" />
+      <label class="media-filter">
+        <input type="checkbox" id="mediaOnly" onchange="loadJokes()" /> Только с медиа
+      </label>
+    </div>
+
+    <form id="jokeForm">
+      <textarea id="jokeText" placeholder="Напишите свою шутку..." required maxlength="500"></textarea>
+      <input type="text" id="mediaUrl" placeholder="Ссылка на изображение/видео/аудио/архив" oninput="showMediaPreview(this.value)" />
+      <input type="file" id="videoInput" accept=".mp4,.mp3,.zip,.rar,.7z,.webm,.ogg" onchange="uploadVideo()" />
+      <input type="text" id="tagInput" placeholder="Теги (через запятую)" />
+      <div class="media-preview" id="mediaPreview"></div>
+      <button type="submit">Опубликовать</button>
+    </form>
+
+    <div class="loader" id="loader"></div>
+    <div id="jokesContainer" class="jokes-container"></div>
+    <div class="pagination">
+      <button onclick="changePage(-1)">← Назад</button>
+      <span id="currentPage">1</span>
+      <button onclick="changePage(1)">Вперёд →</button>
+    </div>
+    <div id="notification" class="notification"></div>
+  </div>
+
+  <script>
+    let isLoading = false;
+    let currentPage = 1;
+    const PAGE_SIZE = 10;
+
+    const loader = document.getElementById('loader');
+    const notification = document.getElementById('notification');
+
+    const showNotification = (message, isError = false) => {
+      notification.textContent = message;
+      notification.className = `notification ${isError ? 'error' : ''} show`;
+      setTimeout(() => notification.classList.remove('show'), 3000);
+    };
+
+    async function uploadVideo() {
+  const fileInput = document.getElementById('videoInput');
+  const file = fileInput.files[0];
+  if (!file) {
+    showNotification('Файл не выбран', true);
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('video', file);
+
+  try {
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData
+    });
+    if (res.ok) {
+      const data = await res.json();
+      document.getElementById('mediaUrl').value = data.url;
+      showMediaPreview(data.url);
+    } else {
+      showNotification('Ошибка загрузки файла', true);
+    }
+  } catch (err) {
+    showNotification('Ошибка подключения к серверу', true);
+  }
+}
+function changePage(delta) {
+  currentPage += delta;
+  if (currentPage < 1) currentPage = 1; // Запрещаем переход на страницу меньше 1
+  document.getElementById('currentPage').textContent = currentPage;
+  loadJokes();
+}
+
+
+    const isValidMediaUrl = (url) => {
+      const allowedExtensions = [
+        '.mp4', '.webm', '.ogg', '.mp3', '.wav', '.zip', '.rar', '.7z', '.tar', '.gz', '.png', '.jpg', '.jpeg', '.gif', '.webp'
+      ];
+      return /^https?:\/\//.test(url) || /^\/upload\//.test(url) || allowedExtensions.some(ext => url.toLowerCase().endsWith(ext));
+    };
+
+    function renderMedia(url) {
+      const ext = url.split('.').pop().toLowerCase();
+      if (['mp4', 'webm', 'ogg'].includes(ext)) {
+        return `<div class="media-container">
+                  <video controls><source src="${url}" type="video/${ext}">Ваш браузер не поддерживает видео.</video>
+                </div>`;
+      }
+      if (['mp3', 'wav'].includes(ext)) {
+        return `<div class="media-container">
+                  <audio controls><source src="${url}" type="audio/${ext}">Ваш браузер не поддерживает аудио.</audio>
+                </div>`;
+      }
+      if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) {
+        return `<div class="media-container">
+                  <a href="${url}" download class="archive-link">📦 Скачать архив</a>
+                </div>`;
+      }
+      return `<div class="media-container"><img src="${url}" alt=""></div>`;
+    }
+
+    function showMediaPreview(url) {
+      const preview = document.getElementById('mediaPreview');
+      preview.innerHTML = url && isValidMediaUrl(url) ? renderMedia(url) : '';
+    }
+
+    async function loadJokes() {
+      if (isLoading) return;
+      isLoading = true;
+      loader.style.display = 'block';
+
+      try {
+        const params = new URLSearchParams({
+          sort: document.getElementById('sortSelect').value,
+          mediaOnly: document.getElementById('mediaOnly').checked,
+          search: document.getElementById('searchInput').value,
+          category: document.getElementById('categorySelect').value,
+          tag: document.getElementById('tagFilter').value.trim().toLowerCase(),
+          page: currentPage,
+          limit: PAGE_SIZE
+        });
+
+        const response = await fetch(`/api/jokes?${params}`);
+        const jokes = await response.json();
+        renderJokes(jokes);
+      } catch (err) {
+        showNotification('Ошибка загрузки шуток', true);
+      } finally {
+        isLoading = false;
+        loader.style.display = 'none';
+      }
+    }
+
+    document.getElementById('jokeForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = document.getElementById('jokeText').value.trim();
+      const media = document.getElementById('mediaUrl').value.trim();
+      const tags = document.getElementById('tagInput').value
+        .split(',')
+        .map(tag => tag.trim().toLowerCase())
+        .filter(Boolean);
+
+      if (!text) return showNotification('Введите текст шутки', true);
+      if (media && !isValidMediaUrl(media)) return showNotification('Некорректная ссылка на медиа', true);
+
+      try {
+        const res = await fetch('/api/jokes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ text, media, tags })
+        });
+        if (res.ok) {
+          document.getElementById('jokeForm').reset();
+          document.getElementById('mediaPreview').innerHTML = '';
+          showNotification('Шутка опубликована!');
+          loadJokes();
+        }
+      } catch {
+        showNotification('Ошибка отправки шутки', true);
+      }
+    });
+
+    function renderJokes(jokes) {
+      const container = document.getElementById('jokesContainer');
+      container.innerHTML = jokes.map(joke => `
+        <div class="joke-card" data-id="${joke.id}">
+          <p class="joke-text">${joke.text}</p>
+          ${joke.media ? renderMedia(joke.media) : ''}
+          <div class="joke-footer">
+            <div class="reactions">
+              <button class="like-btn ${joke.userVote === 'like' ? 'active' : ''}" onclick="handleVote(${joke.id}, 'like')">👍 <span>${joke.likes}</span></button>
+              <button class="dislike-btn ${joke.userVote === 'dislike' ? 'active' : ''}" onclick="handleVote(${joke.id}, 'dislike')">👎 <span>${joke.dislikes}</span></button>
+            </div>
+            <span class="joke-date">${new Date(joke.date).toLocaleDateString('ru-RU')}</span>
+          </div>
+          <div class="comments">
+            <input type="text" placeholder="Ваш комментарий..." onkeydown="submitComment(event, ${joke.id})">
+            <div class="comment-list" id="comments-${joke.id}">
+              ${joke.comments?.map(c => `<p>${c.text}</p>`).join('') || ''}
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function handleVote(jokeId, voteType) {
+      const card = document.querySelector(`.joke-card[data-id="${jokeId}"]`);
+      const likeBtn = card.querySelector('.like-btn');
+      const dislikeBtn = card.querySelector('.dislike-btn');
+
+      try {
+        const res = await fetch(`/api/jokes/${jokeId}/vote`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ voteType }),
+          credentials: 'include'
+        });
+        if (res.ok) {
+          const data = await res.json();
+          likeBtn.querySelector('span').textContent = data.likes;
+          dislikeBtn.querySelector('span').textContent = data.dislikes;
+          likeBtn.classList.toggle('active', data.userVote === 'like');
+          dislikeBtn.classList.toggle('active', data.userVote === 'dislike');
+        }
+      } catch {
+        showNotification('Ошибка голосования', true);
+      }
+    }
+
+    async function submitComment(e, id) {
+      if (e.key !== 'Enter') return;
+      const text = e.target.value.trim();
+      if (!text) return;
+
+      const res = await fetch(`/api/jokes/${id}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ text })
+      });
+
+      if (res.ok) {
+        const comment = await res.json();
+        const container = document.getElementById(`comments-${id}`);
+        container.innerHTML += `<p>${comment.text}</p>`;
+        e.target.value = '';
+      } else {
+        showNotification('Ошибка комментария', true);
+      }
+    }
+
+    async function loadCategories() {
+      const res = await fetch('/api/categories');
+      const cats = await res.json();
+      const select = document.getElementById('categorySelect');
+      cats.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c;
+        opt.textContent = c;
+        select.appendChild(opt);
+      });
+    }
+
+    function toggleTheme() {
+      const isDark = document.body.dataset.theme === 'dark';
+      document.body.dataset.theme = isDark ? 'light' : 'dark';
+      localStorage.setItem('theme', document.body.dataset.theme);
+    }
+
+    function init() {
+      document.body.dataset.theme = localStorage.getItem('theme') || 'light';
+      loadCategories();
+      loadJokes();
+    }
+
+    init();
+  </script>
+</body>
+</html>
