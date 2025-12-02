@@ -1,0 +1,2 @@
+# System maintenance tasks - one per line or block; agent will execute safely
+echo 'system idle check' > /tmp/agent_system_check.txt
